@@ -9,13 +9,13 @@ fn should_create_default_file_watch() {
     fs::write(&config_file, "1").unwrap();
 
     // Note the `watch` is a `Watch<Option<i32>>` because we didn't specify an initial value.
-    let watch = Builder::default()
+    let watch = Builder::new()
         .file(&config_file)
         .no_debounce()
         .build(|res: Result<&Path, Error>| {
             let path = res.unwrap();
             let contents = fs::read_to_string(path).unwrap();
-            contents.parse::<i32>().map(Some)
+            contents.parse::<i32>().map(Some).ok()
         })
         .unwrap();
 
@@ -46,8 +46,8 @@ fn should_create_file_watch() {
         .no_debounce()
         .build(|path: Result<&Path, Error>| {
             let path = path.unwrap();
-            let contents = fs::read_to_string(path).unwrap();
-            contents.parse::<i32>()
+            let contents = fs::read_to_string(path).ok()?;
+            contents.parse::<i32>().ok()
         })
         .unwrap();
 
@@ -64,13 +64,11 @@ fn should_create_a_watch_for_file_that_does_not_exist() {
     let watch = Builder::default()
         .file(config_file)
         .no_debounce()
-        .build(
-            |path: Result<&Path, Error>| -> anyhow::Result<Option<i32>> {
-                let path = path.unwrap();
-                let contents = fs::read_to_string(path)?;
-                Ok(contents.parse().map(Some)?)
-            },
-        )
+        .build(|path: Result<&Path, Error>| -> Option<Option<i32>> {
+            let path = path.unwrap();
+            let contents = fs::read_to_string(path).ok()?;
+            Some(contents.parse().ok())
+        })
         .unwrap();
 
     assert_eq!(**watch.value(), None);
@@ -85,10 +83,10 @@ fn should_create_a_watch_no_file_and_initial_value() {
     let watch = Builder::with_default(0)
         .file(&config_file)
         .no_debounce()
-        .build(|path: Result<&Path, Error>| -> anyhow::Result<i32> {
+        .build(|path: Result<&Path, Error>| -> Option<i32> {
             let path = path.unwrap();
-            let contents = fs::read_to_string(path)?;
-            Ok(contents.parse()?)
+            let contents = fs::read_to_string(path).ok()?;
+            contents.parse().ok()
         })
         .unwrap();
 

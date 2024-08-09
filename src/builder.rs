@@ -3,7 +3,9 @@ use std::{
     time::Duration,
 };
 
-use crate::{Error, Loader, Watch};
+use arc_swap::ArcSwap;
+
+use crate::{Context, Error, Loader, Watch};
 
 const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(100);
 
@@ -58,46 +60,61 @@ impl<T: Send + Sync + 'static> Builder<T> {
     }
 
     /// Build the Watch instance with the specified loader.
-    pub fn build<L, E>(self, mut loader: L) -> Result<Watch<T>, Error>
+    pub fn build<L>(self, mut loader: L) -> Result<Watch<T>, Error>
     where
-        L: Loader<T, E> + Send + 'static,
+        L: Loader<T> + Send + 'static,
     {
-        // Try to load here to set the initial value.
         let changed_files: Vec<_> = self.files.iter().map(|f| f.as_ref()).collect();
-        let (files, value) = match loader.files_changed(&changed_files) {
-            Ok(loaded) => {
-                let files = loaded.dependencies.unwrap_or(self.files);
-                (files, loaded.value)
-            }
-            Err(_) => {
-                // Use the default value if we can't load the file.
-                (self.files, self.default)
-            }
-        };
+        let value = ArcSwap::from_pointee(self.default);
+        let mut files = self.files.clone();
+
+        // Try to load here to set the initial value.
+        let mut context = Context::for_paths(&changed_files, &value, &mut files);
+        loader.files_changed(&mut context);
+        let value = value.into_inner();
 
         Watch::create(files, value, self.debounce, loader)
     }
 
-    #[cfg(feature = "json")]
     /// Build the Watch instance with the specified loader, using a JSON loader.
-    pub fn json(self) -> Result<Watch<T>, Error>
+    ///
+    /// If an error occurs reading the file, the supplied error handling function
+    /// will be called, which can be used to log the error.
+    ///
+    #[cfg(feature = "json")]
+    pub fn json<F>(self, mut f: F) -> Result<Watch<T>, Error>
     where
         T: serde::de::DeserializeOwned,
+        F: FnMut(Error) + Send + 'static,
     {
-        self.build(|res: Result<&Path, Error>| match res {
+        self.build(move |res: Result<&Path, Error>| match res {
             Ok(path) => {
-                let contents = std::fs::read_to_string(path).map_err(Error::Io)?;
-                let value: T = serde_json::from_str(&contents)
-                    .map_err(|e| Error::ParseError(e.to_string()))?;
-                Ok(value)
+                let result =
+                    std::fs::read_to_string(path)
+                        .map_err(Error::Io)
+                        .and_then(|contents| {
+                            serde_json::from_str::<T>(&contents)
+                                .map_err(|e| Error::ParseError(e.to_string()))
+                        });
+
+                match result {
+                    Ok(value) => Some(value),
+                    Err(e) => {
+                        f(e);
+                        None
+                    }
+                }
             }
-            Err(e) => Err(e),
+            Err(e) => {
+                f(e);
+                None
+            }
         })
     }
 }
 impl<T> Builder<Option<T>> {
     /// Create a new Builder for a Watch with no initial value.
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             default: None,
             files: vec![],

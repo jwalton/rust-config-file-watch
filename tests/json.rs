@@ -18,8 +18,10 @@ fn should_load_a_json_file() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(&config_file, r#"{"value": 1}"#).unwrap();
 
     // Create our watch.
-    let watch: Watch<Option<ConfigFile>> =
-        Builder::default().file(&config_file).no_debounce().json()?;
+    let watch: Watch<Option<ConfigFile>> = Builder::default()
+        .file(&config_file)
+        .no_debounce()
+        .json(|err| eprintln!("Error reading config: {err}"))?;
 
     // Make sure the value was loaded correctly.
     let guard = watch.value();
@@ -28,7 +30,10 @@ fn should_load_a_json_file() -> Result<(), Box<dyn std::error::Error>> {
         None => panic!("Expected a value"),
     }
 
+    // Update the config file.
     fs::write(&config_file, r#"{"value": 2}"#).unwrap();
+
+    // Make sure we get our new value.
     std::thread::sleep(std::time::Duration::from_millis(100));
     let guard_2 = watch.value();
     assert_eq!(guard_2.as_ref().as_ref().unwrap().value, 2);

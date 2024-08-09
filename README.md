@@ -25,10 +25,10 @@ struct ConfigFile {
 }
 
 fn use_config() {
-    let config_file = "./my-config.json";
     let default_config = ConfigFile { value: 7 };
-    let watch: Watch<ConfigFile> =
-        Builder::with_default(default_config).file(config_file).json()?;
+    let watch: Watch<ConfigFile> = Builder::with_default(default_config)
+        .file("./my-config.json")
+        .json(|err| eprintln!("Error reading config: {err}"))?;
 
     // Make sure the value was loaded correctly.
     let config = watch.value();
@@ -36,4 +36,37 @@ fn use_config() {
 }
 ```
 
-Here we used `Builder::with_default()` to supply a default ConfigFile to use if the "my-config.json" file doesn't exist or can't be read. We could instead use `Builder::new()` to create a `Watch<Option<ConfigFile>>` with no default value. If you have a more complicated use case, you can call `Builder::build()` and pass in a closure to handle how to load your configuration file, or pass in a `Loader` object which will let you handle more complicated cases, like [tracking multiple files and their dependencies](./tests/dependencies.rs).
+By default, this will debounce file events by 100ms. Here we used `Builder::with_default()` to supply a default ConfigFile to use if the "my-config.json" file doesn't exist or can't be read. We could instead use `Builder::new()` to create a `Watch<Option<ConfigFile>>` with no default value.
+
+Here's another example, using a custom function to load the contents of the file:
+
+```rs
+let watch = Builder::new()
+    .file("./my-config")
+    .build(|res: Result<&Path, Error>| {
+        match res {
+            Ok(path) => {
+                let contents = fs::read_to_string(path).unwrap();
+                // TODO: Do things to `contents` here.
+                let config = 0;
+
+                // We return `Some` to update the config, or `None` to skip
+                // an update.  Here, the watch is a `Watch<Option<i32>`, so we
+                // return `Some(Some(config))` to update the config, or
+                // `Some(None)` to clear the stored config value.
+                Some(Some(config))
+            }
+            Err(err) => {
+                println!("Error watching file: {err}");
+                None
+            }
+        }
+    })
+    .unwrap();
+```
+
+If you have a more complicated use case, you can also pass a `Loader` to `Builder::build()` which will give you control over when the value is updated, and allow [tracking multiple files and their dependencies](./tests/dependencies.rs).
+
+## Usage with Tokio
+
+TODO

@@ -1,3 +1,5 @@
+#[doc = include_str!("../README.md")]
+
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, Weak},
@@ -14,8 +16,9 @@ mod file_watcher;
 mod loader;
 
 pub use builder::Builder;
+pub use context::Context;
 pub use error::Error;
-pub use loader::{Loaded, Loader};
+pub use loader::Loader;
 
 /// A guard for the current value of a Watch.
 pub type Guard<T> = arc_swap::Guard<Arc<T>>;
@@ -40,19 +43,19 @@ impl<T> Watch<T> {
     ///   the file changes.  Loader returns the new value, and a new list of files
     ///   to watch including any dependencies
     ///
-    fn create<FILES, LOADER, ERR>(
-        files: FILES,
-        default: T,
+    fn create<FilesIter, LoaderImpl>(
+        files: FilesIter,
+        default: Arc<T>,
         debounce: Option<Duration>,
-        mut loader: LOADER,
+        mut loader: LoaderImpl,
     ) -> Result<Self, Error>
     where
-        FILES: IntoIterator,
-        FILES::Item: AsRef<Path>,
+        FilesIter: IntoIterator,
+        FilesIter::Item: AsRef<Path>,
         T: Send + Sync + 'static,
-        LOADER: Loader<T, ERR> + Send + 'static,
+        LoaderImpl: Loader<T> + Send + 'static,
     {
-        let value = Arc::new(ArcSwap::from(Arc::new(default)));
+        let value = Arc::new(ArcSwap::from(default));
         let files = files
             .into_iter()
             .map(|f| f.as_ref().to_path_buf())
@@ -66,41 +69,13 @@ impl<T> Watch<T> {
             let value = value.clone();
             let weak = weak.clone();
 
-            FileWatcher::create(files, debounce, move |res| {
-                match res {
-                    Ok(modified_files) => {
-                        let loaded = loader.files_changed(modified_files);
-                        match loaded {
-                            Ok(loaded) => {
-                                value.store(Arc::new(loaded.value));
-
-                                if let Some(dependencies) = loaded.dependencies {
-                                    let weak_guard = weak.lock().unwrap();
-                                    let watcher =
-                                        match weak_guard.as_ref().and_then(|w| w.upgrade()) {
-                                            Some(weak) => weak,
-                                            None => {
-                                                // If the weak ref to the FileWatch has been dropped, then
-                                                // the Watch must have been dropped too; there's no one
-                                                // left for us to notify about changes.
-                                                return;
-                                            }
-                                        };
-
-                                    if let Err(err) = watcher.update_files(dependencies) {
-                                        loader.on_error(err);
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // Loader errored. This means it couldn't load the file.
-                                // Leave whatever value we have in place.
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        loader.on_error(e);
-                    }
+            FileWatcher::create(files, debounce, move |res| match res {
+                Ok(modified_files) => {
+                    let mut context = Context::for_watch(modified_files, &value, &weak);
+                    loader.files_changed(&mut context);
+                }
+                Err(e) => {
+                    loader.on_error(e);
                 }
             })?
         };
@@ -135,10 +110,11 @@ impl<T> Watch<T> {
 impl<T> Watch<Option<T>> {
     /// Create a watch for a JSON file.
     #[cfg(feature = "json")]
-    pub fn json(file: impl AsRef<Path>) -> Result<Watch<Option<T>>, Error>
+    pub fn json<F>(file: impl AsRef<Path>, f: F) -> Result<Watch<Option<T>>, Error>
     where
         T: serde::de::DeserializeOwned + Send + Sync + 'static,
+        F: FnMut(Error) + Send + 'static,
     {
-        Builder::default().files([file]).json()
+        Builder::default().files([file]).json(f)
     }
 }

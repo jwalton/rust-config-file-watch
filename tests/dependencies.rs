@@ -1,11 +1,6 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    thread,
-    time::Duration,
-};
+use std::{fs, path::PathBuf, thread, time::Duration};
 
-use config_file_watch::{Builder, Loaded, Loader};
+use config_file_watch::{Builder, Context, Loader};
 use serde::Deserialize;
 
 /// This tests the case where we have some configuration file that includes other
@@ -31,7 +26,8 @@ fn should_handle_dependencies() {
     }
 
     impl ConfigLoader {
-        fn load(&mut self) -> anyhow::Result<Loaded<Vec<i32>>> {
+        /// Returns the configuration, and a list of files that were loaded.
+        fn load(&self) -> anyhow::Result<(Vec<i32>, Vec<PathBuf>)> {
             // Build up a list of all the files we loaded.
             let mut dependencies = vec![self.config_file.clone()];
 
@@ -51,18 +47,25 @@ fn should_handle_dependencies() {
                 dependencies.push(included_file.to_owned());
             }
 
-            Ok(Loaded::new(values).with_dependencies(dependencies))
+            Ok((values, dependencies))
         }
     }
 
-    impl Loader<Vec<i32>, anyhow::Error> for ConfigLoader {
+    impl Loader<Vec<i32>> for ConfigLoader {
         /// Called when a file changes.
-        fn files_changed(&mut self, _: &[&Path]) -> anyhow::Result<Loaded<Vec<i32>>> {
+        fn files_changed(&mut self, context: &mut Context<Vec<i32>>) {
             match self.load() {
-                Ok(loaded) => Ok(loaded),
-                Err(e) => {
-                    println!("Error loading config: {:?}", e);
-                    Err(e)
+                Ok((new_value, dependencies)) => {
+                    // Update the value stored in the watch.
+                    context.update_value(new_value);
+
+                    // Update the list of watched files.
+                    if let Err(err) = context.update_watched_files(&dependencies) {
+                        println!("Error updating dependencies: {err:?}");
+                    }
+                }
+                Err(err) => {
+                    println!("Error loading config: {err:?}");
                 }
             }
         }
@@ -71,9 +74,6 @@ fn should_handle_dependencies() {
     let dir = tempfile::tempdir().unwrap();
 
     let main_config_file = dir.path().join("file.json");
-    let included_1 = dir.path().join("included_1.json");
-    let included_2 = dir.path().join("included_2.json");
-
     fs::write(
         &main_config_file,
         r#"{
@@ -83,8 +83,10 @@ fn should_handle_dependencies() {
     )
     .unwrap();
 
+    let included_1 = dir.path().join("included_1.json");
     fs::write(&included_1, r#"{ "value": 2 }"#).unwrap();
 
+    let included_2 = dir.path().join("included_2.json");
     fs::write(&included_2, r#"{ "value": 3 }"#).unwrap();
 
     let watch = Builder::with_default(Vec::new())
@@ -132,6 +134,7 @@ fn should_handle_dependencies() {
 
     thread::sleep(Duration::from_millis(100));
     assert_eq!(**watch.value(), vec![1, 3]);
+    // Should no longer be watching the extra dependency.
     assert_eq!(
         **watch.watched_files(),
         vec![main_config_file.clone(), included_2.clone()]

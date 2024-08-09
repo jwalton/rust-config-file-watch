@@ -238,6 +238,7 @@ mod tests {
         fs::write(&config_file2, "test2").unwrap();
 
         // Should get one change event.
+        // FIXME: These should be unordered.
         assert_eq!(rx.recv().unwrap(), vec![config_file, config_file2]);
     }
 
