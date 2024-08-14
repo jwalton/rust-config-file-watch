@@ -1,5 +1,4 @@
 #[doc = include_str!("../README.md")]
-
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, Weak},
@@ -13,12 +12,14 @@ mod builder;
 mod context;
 mod error;
 mod file_watcher;
-mod loader;
+mod loaders;
+mod types;
 
 pub use builder::Builder;
 pub use context::Context;
 pub use error::Error;
-pub use loader::Loader;
+pub use loaders::*;
+pub use types::*;
 
 /// A guard for the current value of a Watch.
 pub type Guard<T> = arc_swap::Guard<Arc<T>>;
@@ -43,17 +44,21 @@ impl<T> Watch<T> {
     ///   the file changes.  Loader returns the new value, and a new list of files
     ///   to watch including any dependencies
     ///
-    fn create<FilesIter, LoaderImpl>(
+    fn create<FilesIter, LoaderImpl, Updated, ErrorHandlerImpl>(
         files: FilesIter,
-        default: Arc<T>,
+        default: ArcSwap<T>,
         debounce: Option<Duration>,
         mut loader: LoaderImpl,
+        mut after_update: Updated,
+        mut error_handler: ErrorHandlerImpl,
     ) -> Result<Self, Error>
     where
         FilesIter: IntoIterator,
         FilesIter::Item: AsRef<Path>,
         T: Send + Sync + 'static,
         LoaderImpl: Loader<T> + Send + 'static,
+        Updated: UpdatedHandler<T> + Send + 'static,
+        ErrorHandlerImpl: ErrorHandler + Send + 'static,
     {
         let value = Arc::new(ArcSwap::from(default));
         let files = files
@@ -69,13 +74,26 @@ impl<T> Watch<T> {
             let value = value.clone();
             let weak = weak.clone();
 
-            FileWatcher::create(files, debounce, move |res| match res {
+            FileWatcher::create(files.clone(), debounce, move |res| match res {
                 Ok(modified_files) => {
-                    let mut context = Context::for_watch(modified_files, &value, &weak);
-                    loader.files_changed(&mut context);
+                    let mut context = Context::for_watch(modified_files, &weak);
+                    match loader.load(&mut context) {
+                        Ok(v) => {
+                            value.store(Arc::new(v));
+                            after_update.after_update(&mut context, value.load());
+                        }
+                        Err(e) => {
+                            error_handler.on_error(&mut context, Error::LoadError(e));
+                        }
+                    }
                 }
                 Err(e) => {
-                    loader.on_error(e);
+                    // Context always assumes at least one file has changed, so
+                    // fill the context with dummy files.
+                    // TODO: Can we get here with 0 files?
+                    let files = files.iter().map(|f| f.as_ref()).collect::<Vec<_>>();
+                    let mut context = Context::for_watch(&files, &weak);
+                    error_handler.on_error(&mut context, Error::WatchError(e.to_string()));
                 }
             })?
         };
@@ -89,11 +107,6 @@ impl<T> Watch<T> {
         Ok(Watch { value, watcher })
     }
 
-    /// Update the set of files to watch for changes.
-    pub fn update_files(&mut self, files: &[impl AsRef<Path>]) -> Result<(), Error> {
-        self.watcher.update_files(files)
-    }
-
     /// Return the set of files this watcher is watching.
     pub fn watched_files(&self) -> Guard<Vec<PathBuf>> {
         self.watcher.watched_files()
@@ -104,17 +117,5 @@ impl<T> Watch<T> {
     /// to preserve consistency.
     pub fn value(&self) -> Guard<T> {
         self.value.load()
-    }
-}
-
-impl<T> Watch<Option<T>> {
-    /// Create a watch for a JSON file.
-    #[cfg(feature = "json")]
-    pub fn json<F>(file: impl AsRef<Path>, f: F) -> Result<Watch<Option<T>>, Error>
-    where
-        T: serde::de::DeserializeOwned + Send + Sync + 'static,
-        F: FnMut(Error) + Send + 'static,
-    {
-        Builder::default().files([file]).json(f)
     }
 }

@@ -161,13 +161,12 @@ where
     changed_files
         .into_iter()
         .filter_map(|changed_file| {
-            //  We need to canonicalize the paths from the event here and from
+            // We need to canonicalize the paths from the event here and from
             // the list of files to watch, since either could include
-            // a symlink. We can't canonicalize the the paths in `files`
-            // outside, since they may or may not exist at that point.
-            if let Ok(event_path) = changed_file.as_ref().canonicalize() {
+            // a symlink.
+            if let Ok(event_path) = canonicalize(changed_file.as_ref()) {
                 for file in watched_files {
-                    if let Ok(file_path) = file.canonicalize() {
+                    if let Ok(file_path) = canonicalize(file) {
                         if event_path == file_path {
                             return Some(file as &Path);
                         }
@@ -179,8 +178,30 @@ where
         .collect()
 }
 
+fn canonicalize(path: &Path) -> std::io::Result<PathBuf> {
+    match path.canonicalize() {
+        Ok(path) => Ok(path),
+        Err(_) => {
+            // If the file doesn't exist, canonicalize will fail. If the file is
+            // removed, though, we still want to match it, so in this case we
+            // canonicalize the parent path and add the filename in.
+            match (path.parent(), path.file_name()) {
+                (Some(parent), Some(file_name)) => {
+                    // Canonicalize the parent path, then add in our path
+                    let parent = parent.canonicalize()?;
+                    let path = parent.join(file_name);
+                    Ok(parent.join(path))
+                }
+                _ => Ok(path.to_owned()),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use map_macro::hash_set;
+
     use super::*;
     use std::{fs, sync::mpsc};
 
@@ -200,14 +221,23 @@ mod tests {
                     .unwrap()
                     .iter()
                     .map(|f| f.to_path_buf())
-                    .collect::<Vec<_>>();
+                    .collect::<HashSet<_>>();
                 tx.send(files).unwrap();
             },
         )
         .unwrap();
 
         fs::write(&config_file, "test2").unwrap();
-        assert_eq!(rx.recv().unwrap(), vec![config_file]);
+        assert_eq!(
+            rx.recv().unwrap(),
+            hash_set![config_file.clone()]
+        );
+
+        fs::remove_file(&config_file).unwrap();
+        assert_eq!(
+            rx.recv().unwrap(),
+            hash_set![config_file]
+        );
     }
 
     #[test]
@@ -227,7 +257,7 @@ mod tests {
                     .unwrap()
                     .iter()
                     .map(|f| f.to_path_buf())
-                    .collect::<Vec<_>>();
+                    .collect::<HashSet<_>>();
                 tx.send(files).unwrap();
             },
         )
@@ -238,8 +268,7 @@ mod tests {
         fs::write(&config_file2, "test2").unwrap();
 
         // Should get one change event.
-        // FIXME: These should be unordered.
-        assert_eq!(rx.recv().unwrap(), vec![config_file, config_file2]);
+        assert_eq!(rx.recv().unwrap(), hash_set![config_file, config_file2]);
     }
 
     #[test]
@@ -255,7 +284,7 @@ mod tests {
                 .unwrap()
                 .iter()
                 .map(|res| res.to_path_buf())
-                .collect::<Vec<_>>();
+                .collect::<HashSet<_>>();
             tx.send(files).unwrap();
         })
         .unwrap();
@@ -265,8 +294,8 @@ mod tests {
         fs::write(&config_file, "test").unwrap();
 
         // Should not get any events for `test2`, since we're only watching `test`.
-        assert_eq!(rx.recv().unwrap(), vec![config_file.clone()]);
-        assert_eq!(rx.recv().unwrap(), vec![config_file]);
+        assert_eq!(rx.recv().unwrap(), hash_set![config_file.clone()]);
+        assert_eq!(rx.recv().unwrap(), hash_set![config_file]);
     }
 
     #[test]
@@ -286,17 +315,17 @@ mod tests {
                     .unwrap()
                     .iter()
                     .map(|f| f.to_path_buf())
-                    .collect::<Vec<_>>();
+                    .collect::<HashSet<_>>();
                 tx.send(files).unwrap();
             },
         )
         .unwrap();
 
         fs::write(&config_file_a, "test").unwrap();
-        assert_eq!(rx.recv().unwrap(), vec![config_file_a.clone()]);
+        assert_eq!(rx.recv().unwrap(), hash_set![config_file_a.clone()]);
 
         fs::write(&config_file_b, "test").unwrap();
-        assert_eq!(rx.recv().unwrap(), vec![config_file_b.clone()]);
+        assert_eq!(rx.recv().unwrap(), hash_set![config_file_b.clone()]);
 
         watcher
             .update_files(&[&config_file_b, &config_file_c])
@@ -306,6 +335,6 @@ mod tests {
         // file list.
         fs::write(&config_file_a, "test2").unwrap();
         fs::write(&config_file_c, "test3").unwrap();
-        assert_eq!(rx.recv().unwrap(), vec![config_file_c.clone()]);
+        assert_eq!(rx.recv().unwrap(), hash_set![config_file_c.clone()]);
     }
 }

@@ -1,9 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
-
-use arc_swap::ArcSwap;
+use std::path::{Path, PathBuf};
 
 use crate::{Error, WeakFileWatcher};
 
@@ -16,33 +11,25 @@ enum Paths<'a> {
 }
 
 /// Context is used to control the Watch from within the loader.
-pub struct Context<'a, T> {
+pub struct Context<'a> {
     modified_paths: &'a [&'a Path],
-    value: &'a ArcSwap<T>,
     paths: Paths<'a>,
 }
 
-impl<'a, T> Context<'a, T> {
+impl<'a> Context<'a> {
     pub(crate) fn for_paths(
         modified_paths: &'a [&'a Path],
-        value: &'a ArcSwap<T>,
         watch_paths: &'a mut Vec<PathBuf>,
     ) -> Self {
         Self {
             modified_paths,
-            value,
             paths: Paths::Vector(watch_paths),
         }
     }
 
-    pub(crate) fn for_watch(
-        modified_paths: &'a [&'a Path],
-        value: &'a ArcSwap<T>,
-        watcher: &'a WeakFileWatcher,
-    ) -> Self {
+    pub(crate) fn for_watch(modified_paths: &'a [&'a Path], watcher: &'a WeakFileWatcher) -> Self {
         Self {
             modified_paths,
-            value,
             paths: Paths::Watcher(watcher),
         }
     }
@@ -57,11 +44,6 @@ impl<'a, T> Context<'a, T> {
         self.modified_paths
             .first()
             .expect("Should always have at least one modified path in a context")
-    }
-
-    /// Update the value for the Watch.
-    pub fn update_value(&self, value: T) {
-        self.value.store(Arc::new(value));
     }
 
     /// Update the set of files to watch for changes.

@@ -2,16 +2,10 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("No files were specified to watch")]
-    NoFiles,
-    #[error("Path has no filename")]
-    MissingFilename,
-    #[error("Error watching file: {0}")]
+    #[error("Error watching files: {0}")]
     WatchError(String),
-    #[error("Error parsing file: {0}")]
-    ParseError(String),
-    #[error("IO Error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("Load error: {0}")]
+    LoadError(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl From<notify::Error> for Error {

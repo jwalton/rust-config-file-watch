@@ -12,13 +12,16 @@ notify-debouncer-mini = "0.4.1"
 serde = { version = "1.0.205", optional = true }
 serde_json = { version = "1.0.122", optional = true }
 thiserror = "1.0.63"
+tokio = { version = "1.39.2", optional = true, features = ["macros", "rt"] }
 
 [dev-dependencies]
 anyhow = "1.0.86"
+map-macro = "0.3.0"
 serde = { version = "1.0.205", features = ["derive"] }
 serde_json = "1.0.122"
 tempfile = "3.12.0"
+tokio = { version = "1.39.2", features = ["sync"] }
 
 [features]
+tokio = ["dep:tokio"]
 json = ["dep:serde", "dep:serde_json"]
-test = ["json"]
