@@ -88,16 +88,13 @@ impl<T> Watch<T> {
                     }
                 }
                 Err(e) => {
-                    // Context always assumes at least one file has changed, so
-                    // fill the context with dummy files.
-                    // TODO: Can we get here with 0 files?
-                    let files = files.iter().map(|f| f.as_ref()).collect::<Vec<_>>();
-                    let mut context = Context::for_watch(&files, &weak);
+                    let mut context = Context::for_watch(&[], &weak);
                     error_handler.on_error(&mut context, Error::WatchError(e.to_string()));
                 }
             })?
         };
 
+        // Fill in the WeakFileWatcher with a reference to the watcher.
         let watcher = Arc::new(watcher);
         {
             let mut weak_lock = weak.lock().unwrap();
@@ -110,6 +107,15 @@ impl<T> Watch<T> {
     /// Return the set of files this watcher is watching.
     pub fn watched_files(&self) -> Guard<Vec<PathBuf>> {
         self.watcher.watched_files()
+    }
+
+    /// Update the set of watched files.
+    pub fn update_watched_files<FilesIter>(&self, files: FilesIter) -> Result<(), Error>
+    where
+        FilesIter: IntoIterator,
+        FilesIter::Item: AsRef<Path>,
+    {
+        self.watcher.update_files(files)
     }
 
     /// Produces a temporary borrow of the current configuration value. If the

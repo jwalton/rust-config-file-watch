@@ -3,31 +3,37 @@ use std::{fs, sync::mpsc, thread, time::Duration};
 use config_file_watch::{Builder, Context};
 
 fn loader(context: &mut Context) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
-    let path = context.path();
-    let contents = fs::read_to_string(path)?;
-    let value = contents.parse::<i32>()?;
-    Ok(value)
+    match context.path() {
+        Some(path) => {
+            let contents = fs::read_to_string(path)?;
+            let value = contents.parse::<i32>()?;
+            Ok(value)
+        }
+        None => Ok(0),
+    }
 }
 
 fn option_loader(
     context: &mut Context,
 ) -> Result<Option<i32>, Box<dyn std::error::Error + Send + Sync>> {
-    let path = context.path();
-    match fs::read_to_string(path) {
-        Ok(contents) => Ok(Some(contents.parse::<i32>()?)),
-        Err(err) => {
-            if err.kind() == std::io::ErrorKind::NotFound {
-                Ok(None)
-            } else {
-                Err(Box::new(err))
+    match context.path() {
+        Some(path) => match fs::read_to_string(path) {
+            Ok(contents) => Ok(Some(contents.parse::<i32>()?)),
+            Err(err) => {
+                if err.kind() == std::io::ErrorKind::NotFound {
+                    Ok(None)
+                } else {
+                    Err(Box::new(err))
+                }
             }
-        }
+        },
+        None => Ok(None),
     }
 }
 
 #[test]
 fn should_create_file_watch_with_default_value() {
-    // TX and RX so we can signal when the value has changed.
+    // tx and rx so we can signal when the value has changed.
     let (tx, rx) = mpsc::channel();
 
     let dir = tempfile::tempdir().unwrap();
@@ -39,9 +45,6 @@ fn should_create_file_watch_with_default_value() {
         .load(loader)
         .after_update(move |_context: &mut Context, value: _| {
             tx.send(value).unwrap();
-        })
-        .on_error(|_context: &mut Context, err: _| {
-            eprintln!("Error: {err}");
         })
         .build()
         .unwrap();
@@ -69,8 +72,43 @@ fn should_create_file_watch_with_default_value() {
 }
 
 #[test]
+fn should_create_watch_with_no_watched_files() {
+    // tx and rx so we can signal when the value has changed.
+    let (tx, rx) = mpsc::channel();
+
+    let dir = tempfile::tempdir().unwrap();
+    let config_file = dir.path().join("test");
+    fs::write(&config_file, "1").unwrap();
+
+    let watch = Builder::new()
+        .load(loader)
+        .after_update(move |_context: &mut Context, value: _| {
+            tx.send(value).unwrap();
+        })
+        .build()
+        .unwrap();
+
+    // Initial value should be 0, since we aren't watching any files.
+    rx.recv().expect("Expected after_update for initial value");
+    assert_eq!(**watch.value(), 0);
+
+    // Add the file to the list of watched files.
+    println!("Updating watched files: {:?}", config_file);
+    watch.update_watched_files([&config_file]).unwrap();
+
+    // Add a delay here to make this deterministic.
+    thread::sleep(Duration::from_millis(100));
+
+    // Update the file.
+    fs::write(&config_file, "2").unwrap();
+    rx.recv()
+        .expect("Expected after_update after updating watch list");
+    assert_eq!(**watch.value(), 2);
+}
+
+#[test]
 fn should_create_file_watch_with_optional_value() {
-    // TX and RX so we can signal when the value has changed.
+    // tx and rx so we can signal when the value has changed.
     let (tx, rx) = mpsc::channel();
 
     let dir = tempfile::tempdir().unwrap();

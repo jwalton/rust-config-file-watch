@@ -120,9 +120,11 @@ impl FileWatcher {
             .map(|f| f.as_ref().to_path_buf())
             .collect();
 
+        let old_watched_files = self.watched_files.load();
+        self.watched_files.store(Arc::new(files.clone()));
+
         {
-            let watched_files = self.watched_files.load();
-            let old_folders = folders(&watched_files);
+            let old_folders = folders(&old_watched_files);
             let new_folders = folders(&files);
             let mut watcher_lock = self.watcher.lock().unwrap();
             let watcher = watcher_lock.watcher();
@@ -139,8 +141,6 @@ impl FileWatcher {
                 let _ = watcher.unwatch(folder).ok();
             }
         }
-
-        self.watched_files.store(Arc::new(files));
 
         Ok(())
     }
@@ -228,16 +228,10 @@ mod tests {
         .unwrap();
 
         fs::write(&config_file, "test2").unwrap();
-        assert_eq!(
-            rx.recv().unwrap(),
-            hash_set![config_file.clone()]
-        );
+        assert_eq!(rx.recv().unwrap(), hash_set![config_file.clone()]);
 
         fs::remove_file(&config_file).unwrap();
-        assert_eq!(
-            rx.recv().unwrap(),
-            hash_set![config_file]
-        );
+        assert_eq!(rx.recv().unwrap(), hash_set![config_file]);
     }
 
     #[test]
@@ -251,7 +245,7 @@ mod tests {
 
         let _watcher = FileWatcher::create(
             &[&config_file, &config_file2],
-            Some(Duration::from_millis(100)),
+            Some(Duration::from_millis(500)),
             move |res| {
                 let files = res
                     .unwrap()
@@ -278,7 +272,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config_file = dir.path().join("test");
 
-        println!("Creating watcher for {:?}", config_file);
         let _watcher = FileWatcher::create(&[&config_file], None, move |res| {
             let files = res
                 .unwrap()
@@ -336,5 +329,34 @@ mod tests {
         fs::write(&config_file_a, "test2").unwrap();
         fs::write(&config_file_c, "test3").unwrap();
         assert_eq!(rx.recv().unwrap(), hash_set![config_file_c.clone()]);
+    }
+
+    #[test]
+    fn should_not_generate_event_when_adding_file() {
+        let (tx, rx) = mpsc::channel();
+
+        let dir = tempfile::tempdir().unwrap();
+        let config_file = dir.path().join("a");
+
+        let initial_paths: Vec<PathBuf> = vec![];
+        let watcher = FileWatcher::create(initial_paths, None, move |res| {
+            let files = res
+                .unwrap()
+                .iter()
+                .map(|f| f.to_path_buf())
+                .collect::<HashSet<_>>();
+            tx.send(files).unwrap();
+        })
+        .unwrap();
+
+        fs::write(&config_file, "test").unwrap();
+
+        // Add a delay here to make this deterministic. Without this delay we
+        // sometimes get the event, and sometimes don't.
+        std::thread::sleep(Duration::from_millis(100));
+
+        watcher.update_files([&config_file]).unwrap();
+
+        rx.recv_timeout(Duration::from_millis(100)).unwrap_err();
     }
 }

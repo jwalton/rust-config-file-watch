@@ -46,7 +46,6 @@ fn should_handle_dependencies() {
 
             // For each included file, load it and add the value to the list.
             for include in main_config.include {
-                println!("Including: {:?}", include);
                 let included_file = &self.config_file.parent().unwrap().join(include);
                 let include_config: ConfigFile =
                     serde_json::from_str(&fs::read_to_string(included_file)?)?;

@@ -1,6 +1,8 @@
-use std::{fs::File, io::BufReader};
+use std::io::BufReader;
 
 use crate::{Context, Loader};
+
+use super::load_from_file;
 
 #[derive(Debug)]
 pub struct JsonLoader;
@@ -9,20 +11,13 @@ impl<T> Loader<T> for JsonLoader
 where
     T: serde::de::DeserializeOwned + Default,
 {
-    fn load(&mut self, context: &mut Context) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
-        let path = context.path();
-        match File::open(path) {
-            Ok(file) => {
-                let reader = BufReader::new(file);
-                Ok(serde_json::from_reader(reader)?)
-            }
-            Err(err) => {
-                if err.kind() == std::io::ErrorKind::NotFound {
-                    Ok(T::default())
-                } else {
-                    Err(Box::new(err))
-                }
-            }
-        }
+    fn load(
+        &mut self,
+        context: &mut Context,
+    ) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
+        load_from_file(context, |file| {
+            let reader = BufReader::new(file);
+            Ok(serde_json::from_reader(reader)?)
+        })
     }
 }

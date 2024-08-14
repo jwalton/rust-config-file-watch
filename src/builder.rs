@@ -135,11 +135,16 @@ impl<Load, Updated, ErrHandler> Builder<Load, Updated, ErrHandler> {
         // Try to load here to set the initial value.
         let changed_files: Vec<_> = self.files.iter().map(|f| f.as_ref()).collect();
         let mut context = Context::for_paths(&changed_files, &mut files);
-        let value = match loader.load(&mut context) {
-            Ok(v) => ArcSwap::from_pointee(v),
-            Err(e) => {
-                error_handler.on_error(&mut context, Error::LoadError(e));
-                ArcSwap::from_pointee(T::default())
+        let value = if changed_files.is_empty() {
+            // If there are no files, just use the default value.
+            ArcSwap::from_pointee(T::default())
+        } else {
+            match loader.load(&mut context) {
+                Ok(v) => ArcSwap::from_pointee(v),
+                Err(e) => {
+                    error_handler.on_error(&mut context, Error::LoadError(e));
+                    ArcSwap::from_pointee(T::default())
+                }
             }
         };
         after_update.after_update(&mut context, value.load());

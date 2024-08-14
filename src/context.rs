@@ -40,10 +40,8 @@ impl<'a> Context<'a> {
     }
 
     /// Get the first modified path.
-    pub fn path(&self) -> &Path {
-        self.modified_paths
-            .first()
-            .expect("Should always have at least one modified path in a context")
+    pub fn path(&self) -> Option<&Path> {
+        self.modified_paths.first().copied()
     }
 
     /// Update the set of files to watch for changes.

@@ -18,6 +18,7 @@ pub trait ErrorHandler {
 
 /// Handles updates.
 pub trait UpdatedHandler<T> {
+    /// Called after the value has been loaded from disk.
     fn after_update(&mut self, context: &mut Context, value: Guard<T>);
 }
 

@@ -5,7 +5,7 @@ mod tests {
     use config_file_watch::{Builder, Context};
 
     fn loader(context: &mut Context) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
-        let path = context.path();
+        let path = context.path().unwrap();
         let contents = fs::read_to_string(path)?;
         let value = contents.parse::<i32>()?;
         Ok(value)
