@@ -117,4 +117,4 @@ let watch = Builder::new()
 
 ### Configuration Files With Dependencies
 
-You can update which files are being watched via the context passed in to the loader. See [this example in the integration tests](./tests/dependencies.rs).
+You can update which files are being watched via the context passed in to the loader. See [this example in the integration tests](https://github.com/jwalton/rust-config-file-watch/blob/master/tests/dependencies.rs).
