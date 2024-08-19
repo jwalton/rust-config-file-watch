@@ -1,6 +1,6 @@
 #[cfg(feature = "json")]
 mod tests {
-    use std::{fs, sync::mpsc};
+    use std::{fs, sync::mpsc, thread, time::Duration};
 
     use config_file_watch::{Builder, Context, Watch};
     use serde::Deserialize;
@@ -20,6 +20,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config_file = dir.path().join("config.json");
         fs::write(&config_file, r#"{"value": 1}"#).unwrap();
+        // Sleep to make this deterministic. Without this we sometimes
+        // get a second set of events for the files we just created.
+        thread::sleep(Duration::from_millis(100));
 
         // Create our watch.
         let watch: Watch<Option<ConfigFile>> = Builder::new()

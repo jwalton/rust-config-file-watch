@@ -125,3 +125,26 @@ impl<T> Watch<T> {
         self.value.load()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use arc_swap::ArcSwap;
+
+    use crate::{Context, Watch};
+
+    #[test]
+    fn should_error_if_folder_does_not_exist() -> Result<(), Box<dyn std::error::Error>> {
+        let err = Watch::create(
+            &["/i/do/not/exist"],
+            ArcSwap::from_pointee(1),
+            None,
+            |_c: &mut Context| Ok(1),
+            |_c: &mut Context, _v| {},
+            |_c: &mut Context, _err| {},
+        );
+
+        assert!(err.is_err());
+
+        Ok(())
+    }
+}

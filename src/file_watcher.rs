@@ -11,7 +11,10 @@ use notify_debouncer_mini::{DebounceEventResult, Debouncer};
 
 use crate::{Error, Guard};
 
-/// Watches a set of files for changes.
+/// Watches a set of files for changes.  This is essentially a thin wrapper around
+/// `notify::RecommendedWatcher` which takes care of watching parent directories
+/// instead of individual files, so we can be notified when files are created or
+/// deleted.
 #[derive(Debug)]
 pub struct FileWatcher {
     watcher: Arc<Mutex<InnerWatcher>>,

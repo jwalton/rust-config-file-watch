@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::mpsc};
+use std::{fs, path::PathBuf, sync::mpsc, thread, time::Duration};
 
 use config_file_watch::{Builder, Context, Loader};
 use serde::Deserialize;
@@ -82,6 +82,10 @@ fn should_handle_dependencies() {
 
     let included_2 = dir.path().join("included_2.json");
     fs::write(&included_2, r#"{ "value": 3 }"#).unwrap();
+
+    // Sleep to make this deterministic. Without this we sometimes
+    // get a second set of events for the files we just created.
+    thread::sleep(Duration::from_millis(100));
 
     // TX and RX so we can signal when the value has changed.
     let (tx, rx) = mpsc::channel();
