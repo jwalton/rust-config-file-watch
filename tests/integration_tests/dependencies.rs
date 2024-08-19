@@ -3,6 +3,8 @@ use std::{fs, path::PathBuf, sync::mpsc, thread, time::Duration};
 use config_file_watch::{Builder, Context, Loader};
 use serde::Deserialize;
 
+use crate::utils::create_files;
+
 /// This tests the case where we have some configuration file that includes other
 /// configuration files, and we want to reload if any of the affected files change.
 ///
@@ -39,17 +41,23 @@ fn should_handle_dependencies() {
             // Build up a list of all the files we load as we go.
             let mut dependencies = vec![self.config_file.clone()];
 
+            println!("Loading: {:?}", self.config_file);
+
             // Start by loading the main configuration file.
-            let main_config: ConfigFile =
-                serde_json::from_str(&fs::read_to_string(&self.config_file)?)?;
+            let contents = fs::read_to_string(&self.config_file)?;
+            println!("Loaded: {contents}");
+            let main_config: ConfigFile = serde_json::from_str(&contents)?;
+            println!("Including: {:?}", main_config.include);
+            println!("Main value: {}", main_config.value);
             let mut values = vec![main_config.value];
 
             // For each included file, load it and add the value to the list.
             for include in main_config.include {
-                let included_file = &self.config_file.parent().unwrap().join(include);
+                let included_file = &self.config_file.parent().unwrap().join(&include);
                 let include_config: ConfigFile =
                     serde_json::from_str(&fs::read_to_string(included_file)?)?;
                 values.push(include_config.value);
+                println!("{include} value: {}", include_config.value);
 
                 // Add each included config file to the list of dependencies.
                 dependencies.push(included_file.to_owned());
@@ -65,23 +73,21 @@ fn should_handle_dependencies() {
         }
     }
 
-    let dir = tempfile::tempdir().unwrap();
-
-    let main_config_file = dir.path().join("file.json");
-    fs::write(
-        &main_config_file,
-        r#"{
+    let (_guard, files) = create_files(&[
+        (
+            "file.json",
+            r#"{
             "value": 1,
             "include": ["included_1.json", "included_2.json"]
         }"#,
-    )
+        ),
+        ("included_1.json", r#"{ "value": 2 }"#),
+        ("included_2.json", r#"{ "value": 3 }"#),
+    ])
     .unwrap();
-
-    let included_1 = dir.path().join("included_1.json");
-    fs::write(&included_1, r#"{ "value": 2 }"#).unwrap();
-
-    let included_2 = dir.path().join("included_2.json");
-    fs::write(&included_2, r#"{ "value": 3 }"#).unwrap();
+    let main_config_file = &files[0];
+    let included_1 = &files[1];
+    let included_2 = &files[2];
 
     // Sleep to make this deterministic. Without this we sometimes
     // get a second set of events for the files we just created.
@@ -91,7 +97,7 @@ fn should_handle_dependencies() {
     let (tx, rx) = mpsc::channel();
 
     let watch = Builder::new()
-        .watch_file(&main_config_file)
+        .watch_file(main_config_file)
         .load(ConfigLoader {
             config_file: main_config_file.clone(),
         })
@@ -114,7 +120,7 @@ fn should_handle_dependencies() {
     );
 
     // Update one of the dependencies.
-    fs::write(&included_1, r#"{ "value": 5 }"#).unwrap();
+    fs::write(included_1, r#"{ "value": 5 }"#).unwrap();
     // Wait for the watcher to pick up the change.
     rx.recv().unwrap();
     assert_eq!(**watch.value(), vec![1, 5, 3]);
@@ -129,7 +135,7 @@ fn should_handle_dependencies() {
 
     // Remove one of the included files.
     fs::write(
-        &main_config_file,
+        main_config_file,
         r#"{
             "value": 1,
             "include": ["included_2.json"]

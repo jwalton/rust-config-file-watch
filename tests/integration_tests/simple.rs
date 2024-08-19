@@ -3,6 +3,8 @@ use std::{collections::HashSet, fs, sync::mpsc, thread, time::Duration};
 use config_file_watch::{Builder, Context};
 use map_macro::hash_set;
 
+use crate::utils::create_files;
+
 fn loader(context: &mut Context) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
     match context.path() {
         Some(path) => {
@@ -38,15 +40,11 @@ fn should_create_file_watch_with_default_value() {
     // tx and rx so we can signal when the value has changed.
     let (tx, rx) = mpsc::channel();
 
-    let dir = tempfile::tempdir().unwrap();
-    let config_file = dir.path().join("test");
-    fs::write(&config_file, "1").unwrap();
-    // Sleep to make this deterministic. Without this we sometimes
-    // get a second set of events for the files we just created.
-    thread::sleep(Duration::from_millis(100));
+    let (_guard, files) = create_files(&[("config_file", "1")]).unwrap();
+    let config_file = &files[0];
 
     let watch = Builder::new()
-        .watch_file(&config_file)
+        .watch_file(config_file)
         .load(loader)
         .debounce(Duration::from_millis(200))
         .after_update(move |_context: &mut Context, value: _| {
@@ -63,18 +61,18 @@ fn should_create_file_watch_with_default_value() {
     assert_eq!(**watch.value(), 1);
 
     // Update the file.
-    fs::write(&config_file, "2").unwrap();
+    fs::write(config_file, "2").unwrap();
     rx.recv().unwrap();
     assert_eq!(**watch.value(), 2);
 
     // Write a garbage value to the file.
-    fs::write(&config_file, "foo").unwrap();
+    fs::write(config_file, "foo").unwrap();
     // This shouldn't change the value.
     thread::sleep(Duration::from_millis(100));
     assert_eq!(**watch.value(), 2);
 
     // Remove the file.
-    fs::remove_file(&config_file).unwrap();
+    fs::remove_file(config_file).unwrap();
     // This shouldn't change the value.
     thread::sleep(Duration::from_millis(100));
     assert_eq!(**watch.value(), 2);
@@ -85,12 +83,8 @@ fn should_create_watch_with_no_watched_files() {
     // tx and rx so we can signal when the value has changed.
     let (tx, rx) = mpsc::channel();
 
-    let dir = tempfile::tempdir().unwrap();
-    let config_file = dir.path().join("test");
-    fs::write(&config_file, "1").unwrap();
-    // Sleep to make this deterministic. Without this we sometimes
-    // get a second set of events for the files we just created.
-    thread::sleep(Duration::from_millis(100));
+    let (_guard, files) = create_files(&[("config_file", "1")]).unwrap();
+    let config_file = &files[0];
 
     let watch = Builder::new()
         .load(loader)
@@ -112,7 +106,7 @@ fn should_create_watch_with_no_watched_files() {
     thread::sleep(Duration::from_millis(100));
 
     // Update the file.
-    fs::write(&config_file, "2").unwrap();
+    fs::write(config_file, "2").unwrap();
     rx.recv()
         .expect("Expected after_update after updating watch list");
     assert_eq!(**watch.value(), 2);
@@ -123,16 +117,12 @@ fn should_create_file_watch_with_optional_value() {
     // tx and rx so we can signal when the value has changed.
     let (tx, rx) = mpsc::channel();
 
-    let dir = tempfile::tempdir().unwrap();
-    let config_file = dir.path().join("test");
-    fs::write(&config_file, "1").unwrap();
-    // Sleep to make this deterministic. Without this we sometimes
-    // get a second set of events for the files we just created.
-    thread::sleep(Duration::from_millis(100));
+    let (_guard, files) = create_files(&[("config_file", "1")]).unwrap();
+    let config_file = &files[0];
 
     // Note the `watch` is a `Watch<Option<i32>>`.
     let watch = Builder::new()
-        .watch_file(&config_file)
+        .watch_file(config_file)
         .load(option_loader)
         .after_update(move |_context: &mut Context, value: _| {
             tx.send(value).unwrap();
@@ -145,19 +135,19 @@ fn should_create_file_watch_with_optional_value() {
     assert_eq!(**watch.value(), Some(1));
 
     // Update the file.
-    fs::write(&config_file, "2").unwrap();
+    fs::write(config_file, "2").unwrap();
     rx.recv().unwrap();
     thread::sleep(Duration::from_millis(100));
     assert_eq!(**watch.value(), Some(2));
 
     // Write a garbage value to the file.
-    fs::write(&config_file, "foo").unwrap();
+    fs::write(config_file, "foo").unwrap();
     // This shouldn't change the value.
     thread::sleep(Duration::from_millis(100));
     assert_eq!(**watch.value(), Some(2));
 
     // Remove the file.
-    fs::remove_file(&config_file).unwrap();
+    fs::remove_file(config_file).unwrap();
     rx.recv().unwrap();
     assert_eq!(**watch.value(), None);
 }
@@ -182,14 +172,9 @@ fn should_create_file_watch_for_multiple_files() {
     // tx and rx so we can signal when the value has changed.
     let (tx, rx) = mpsc::channel();
 
-    let dir = tempfile::tempdir().unwrap();
-    let config_file_1 = dir.path().join("config_file_1");
-    fs::write(&config_file_1, "1").unwrap();
-    let config_file_2 = dir.path().join("config_file_2");
-    fs::write(&config_file_2, "2").unwrap();
-    // Sleep to make this deterministic. Without this we sometimes
-    // get a second set of events for the files we just created.
-    thread::sleep(Duration::from_millis(100));
+    let (_guard, files) = create_files(&[("config_file_1", "1"), ("config_file_2", "2")]).unwrap();
+    let config_file_1 = &files[0];
+    let config_file_2 = &files[0];
 
     let watch = Builder::new()
         .watch_files(&[&config_file_1, &config_file_2])
@@ -209,13 +194,13 @@ fn should_create_file_watch_for_multiple_files() {
     rx.recv().unwrap();
 
     // Update a file.
-    fs::write(&config_file_1, "2").unwrap();
+    fs::write(config_file_1, "2").unwrap();
     rx.recv().unwrap();
     assert_eq!(**watch.value(), hash_set![config_file_1.to_path_buf()]);
 
     // Update both files.
-    fs::write(&config_file_1, "3").unwrap();
-    fs::write(&config_file_2, "3").unwrap();
+    fs::write(config_file_1, "3").unwrap();
+    fs::write(config_file_2, "3").unwrap();
     rx.recv().unwrap();
     assert_eq!(
         **watch.value(),

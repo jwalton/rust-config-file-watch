@@ -206,7 +206,7 @@ mod tests {
     use map_macro::hash_set;
 
     use super::*;
-    use std::{fs, sync::mpsc};
+    use std::{fs, sync::mpsc, thread};
 
     #[test]
     fn should_watch_a_file() {
@@ -215,6 +215,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config_file = dir.path().join("test");
         fs::write(&config_file, "test").unwrap();
+        thread::sleep(Duration::from_millis(100));
 
         let _watcher = FileWatcher::create(
             &[&config_file],
@@ -245,6 +246,7 @@ mod tests {
         let config_file = dir.path().join("test");
         let config_file2 = dir.path().join("test2");
         fs::write(&config_file, "1").unwrap();
+        thread::sleep(Duration::from_millis(500));
 
         let _watcher = FileWatcher::create(
             &[&config_file, &config_file2],
@@ -302,6 +304,7 @@ mod tests {
         let config_file_a = dir.path().join("a");
         let config_file_b = dir.path().join("b");
         let config_file_c = dir.path().join("c");
+        thread::sleep(Duration::from_millis(100));
 
         let watcher = FileWatcher::create(
             &[&config_file_a, &config_file_b],
@@ -323,6 +326,7 @@ mod tests {
         fs::write(&config_file_b, "test").unwrap();
         assert_eq!(rx.recv().unwrap(), hash_set![config_file_b.clone()]);
 
+        thread::sleep(Duration::from_millis(100));
         watcher
             .update_files(&[&config_file_b, &config_file_c])
             .unwrap();
